@@ -1,0 +1,81 @@
+name: Build APK & publish update
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore signing key
+        uses: actions/cache@v4
+        with:
+          path: signing
+          key: waves-signing-key
+
+      - name: Create signing key (first run only)
+        run: |
+          mkdir -p signing
+          if [ ! -f signing/waves.jks ]; then
+            keytool -genkeypair -v \
+              -keystore signing/waves.jks -alias waves \
+              -keyalg RSA -keysize 2048 -validity 10950 \
+              -storepass waves123456 -keypass waves123456 \
+              -dname "CN=WAVES, OU=Yard, O=Waves, C=GB"
+            echo "Generated new signing key (cached for future runs)."
+          fi
+
+      - name: Build release APK
+        run: gradle -PverName="$(cat VERSION.txt)" assembleRelease
+
+      - name: Align & sign APK
+        run: |
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BT/zipalign" -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            app-release-aligned.apk
+          "$ANDROID_HOME/build-tools/$BT/apksigner" sign \
+            --ks signing/waves.jks \
+            --ks-pass pass:waves123456 \
+            --key-pass pass:waves123456 \
+            --out WAVES.apk app-release-aligned.apk
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify WAVES.apk
+
+      - name: Publish update manifest (OTA)
+        run: |
+          V="$(cat VERSION.txt)"
+          SHA="$(sha256sum app/src/main/assets/game.html | cut -d' ' -f1)"
+          mkdir -p updates
+          printf '{"version":"%s","sha256":"%s","url":"app/src/main/assets/game.html"}\n' \
+            "$V" "$SHA" > updates/latest.json
+          git config user.name  "waves-bot"
+          git config user.email "actions@github.com"
+          git add updates/latest.json
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged."
+          else
+            git commit -m "OTA manifest v$V"
+            git push
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAVES-apk
+          path: WAVES.apk
+          
