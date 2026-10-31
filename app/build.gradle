@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.waves.game'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.waves.game"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName project.findProperty('verName') ?: '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+// no external dependencies — the whole game is plain HTML/JS
